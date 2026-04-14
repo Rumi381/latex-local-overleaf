@@ -19,7 +19,7 @@ This repo is **not**:
 Clone with submodules (recommended):
 
 ```bash
-git clone --recurse-submodules <your-repo-url>
+git clone --recurse-submodules https://github.com/Rumi381/latex-local-overleaf.git
 cd latex-local-overleaf
 ```
 
@@ -68,7 +68,7 @@ First start can take significantly longer because the local hardened TeX image m
 - Bash
 - Use `./work`
 
-### macOS (Supported with caveat)
+### macOS (Supported but not tested)
 
 - Docker Desktop running
 - Git
