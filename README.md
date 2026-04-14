@@ -137,6 +137,7 @@ Implications:
 Primary settings:
 - `TOOLKIT_PATH`, `TOOLKIT_REPO`, `TOOLKIT_REF`
 - `OVERLEAF_HOST`, `OVERLEAF_PORT`
+- `OVERLEAF_APP_NAME` (UI branding title, default `Overleaf`)
 - `BASE_OVERLEAF_IMAGE_TAG`, `OVERLEAF_IMAGE_TAG`
 - `TEXLIVE_PACKAGES`, `TEXLIVE_REQUIRED_SCHEME`, `TEXLIVE_CHECK_FILES`
 - `AUTO_PRUNE_SHARELATEX_IMAGES` (`1` default)
@@ -159,6 +160,16 @@ Then recompile.
 ### Why do multiple `sharelatex/sharelatex` images sometimes appear?
 
 One tag is the active runtime image; others can be base/legacy tags from previous hardening cycles. Use `work images prune` to clean extras. Auto-pruning is enabled by default.
+
+### `Toolkit is not a git checkout and has CRLF scripts` on Windows clone
+
+This usually indicates a broken toolkit checkout state from line-ending conversion or partial submodule init.
+
+Use:
+- `git submodule update --init --recursive`
+- then run `work start` again
+
+Current `work` logic is submodule-safe and will auto-recover common invalid toolkit states.
 
 ## Roadmap (Future Goals, Not Implemented Yet)
 

@@ -36,6 +36,11 @@ is_git_repo() {
   git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
+is_toolkit_git_checkout() {
+  local root="${1:-$(toolkit_root)}"
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 toolkit_root() {
   echo "$REPO_ROOT/$TOOLKIT_PATH"
 }
@@ -55,7 +60,16 @@ ensure_toolkit_line_endings() {
   fi
 
   echo "Detected CRLF in toolkit scripts. Normalizing checkout to LF..."
-  [[ -d "$root/.git" ]] || die "Toolkit is not a git checkout and has CRLF scripts."
+  if ! is_toolkit_git_checkout "$root"; then
+    echo "Toolkit checkout is invalid while CRLF scripts are present. Re-bootstrapping toolkit..."
+    rm -rf "$root"
+    ensure_toolkit_present
+    root="$(toolkit_root)"
+    [[ -f "$root/bin/up" ]] || die "Toolkit bootstrap failed; bin/up is missing."
+    if ! grep -q $'\r' "$root/bin/up"; then
+      return 0
+    fi
+  fi
 
   if ! git -C "$root" diff --quiet || ! git -C "$root" diff --cached --quiet; then
     die "Toolkit has local changes and CRLF scripts. Commit/stash or re-clone toolkit."
@@ -206,21 +220,17 @@ ensure_overleaf_image() {
 ensure_toolkit_present() {
   local root
   root="$(toolkit_root)"
-  if [[ -d "$root/.git" || -f "$root/bin/up" ]]; then
-    if [[ -d "$root/.git" ]]; then
-      if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        git -C "$root" config core.autocrlf false
-        git -C "$root" config core.eol lf
-      else
-        echo "Toolkit directory has invalid git metadata. Re-cloning toolkit..."
-        rm -rf "$root"
-      fi
-    fi
-    [[ -f "$root/bin/up" ]] && return 0
-  fi
-
   if [[ -d "$root" ]]; then
-    if [[ -z "$(ls -A "$root")" ]]; then
+    if is_toolkit_git_checkout "$root"; then
+      git -C "$root" config core.autocrlf false
+      git -C "$root" config core.eol lf
+      [[ -f "$root/bin/up" ]] && return 0
+      echo "Toolkit checkout found but bin/up is missing. Re-bootstrapping toolkit..."
+      rm -rf "$root"
+    elif [[ -f "$root/bin/up" ]]; then
+      echo "Toolkit files found, but checkout is not a valid git worktree. Re-bootstrapping toolkit..."
+      rm -rf "$root"
+    elif [[ -z "$(ls -A "$root")" ]]; then
       rmdir "$root"
     else
       die "Toolkit path exists but is not a valid toolkit checkout: $root"
@@ -243,19 +253,26 @@ ensure_toolkit_present() {
   git -C "$root" checkout "$TOOLKIT_REF"
   git -C "$root" config core.autocrlf false
   git -C "$root" config core.eol lf
+  [[ -f "$root/bin/up" ]] || die "Toolkit bootstrap failed; bin/up is missing."
 }
 
 ensure_toolkit_config() {
-  local root rc_file override_file
+  local root rc_file override_file variables_file app_name
   root="$(toolkit_root)"
   rc_file="$root/config/overleaf.rc"
   override_file="$root/config/docker-compose.override.yml"
+  variables_file="$root/config/variables.env"
+  app_name="${OVERLEAF_APP_NAME:-Overleaf}"
 
   mkdir -p "$root/config"
   mkdir -p "$root/data/logs"
 
-  if [[ ! -f "$rc_file" ]]; then
+  if [[ ! -f "$rc_file" || ! -f "$variables_file" ]]; then
     toolkit_cmd bin/init
+  fi
+
+  if [[ ! -f "$variables_file" && -f "$root/lib/config-seed/variables.env" ]]; then
+    cp "$root/lib/config-seed/variables.env" "$variables_file"
   fi
 
   set_config_value "$rc_file" "OVERLEAF_LISTEN_IP" "$OVERLEAF_HOST"
@@ -263,6 +280,8 @@ ensure_toolkit_config() {
   delete_config_key "$rc_file" "OVERLEAF_LOG_PATH"
   set_config_value "$rc_file" "SERVER_PRO" "false"
   set_config_value "$rc_file" "SIBLING_CONTAINERS_ENABLED" "false"
+  set_config_value "$variables_file" "OVERLEAF_APP_NAME" "\"$app_name\""
+  set_config_value "$variables_file" "OVERLEAF_NAV_TITLE" "\"$app_name\""
 
   cat >"$override_file" <<'EOF'
 volumes:
@@ -393,6 +412,7 @@ cmd_self_check() {
   echo "Toolkit repo: $TOOLKIT_REPO"
   echo "Toolkit pin: $TOOLKIT_REF"
   echo "Host: ${OVERLEAF_HOST}:${OVERLEAF_PORT}"
+  echo "App name: ${OVERLEAF_APP_NAME:-Overleaf}"
   echo "Base image tag: ${BASE_OVERLEAF_IMAGE_TAG:-$OVERLEAF_IMAGE_TAG}"
   echo "Image tag: $OVERLEAF_IMAGE_TAG"
   echo "TeX packages: ${TEXLIVE_PACKAGES:-<none>}"
