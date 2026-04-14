@@ -169,7 +169,14 @@ Use:
 - `git submodule update --init --recursive`
 - then run `work start` again
 
-Current `work` logic is submodule-safe and will auto-recover common invalid toolkit states.
+Current `work` logic is submodule-safe and auto-heals common CRLF checkout issues.
+If recovery is still needed manually, run:
+- `wsl -e bash -lc "cd /mnt/<drive>/<path>/overleaf-toolkit && git config core.autocrlf false && git config core.eol lf && git reset --hard && git clean -fd"`
+
+### Why do I sometimes see TeX Live frozen warnings (`ipaex`, `TLPDB.pm`)?
+
+The internal baseline checks now suppress non-fatal `tlmgr info` warning noise in normal `work` flows.
+Real compile failures are still shown in Overleaf UI and `work logs`.
 
 ## Roadmap (Future Goals, Not Implemented Yet)
 

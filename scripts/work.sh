@@ -71,13 +71,9 @@ ensure_toolkit_line_endings() {
     fi
   fi
 
-  if ! git -C "$root" diff --quiet || ! git -C "$root" diff --cached --quiet; then
-    die "Toolkit has local changes and CRLF scripts. Commit/stash or re-clone toolkit."
-  fi
-
-  git -C "$root" config core.autocrlf false
-  git -C "$root" config core.eol lf
-  git -C "$root" reset --hard >/dev/null
+  git -C "$root" config core.autocrlf false || die "Failed to set toolkit core.autocrlf=false."
+  git -C "$root" config core.eol lf || die "Failed to set toolkit core.eol=lf."
+  git -C "$root" reset --hard >/dev/null || die "Failed to normalize toolkit checkout to LF."
 }
 
 set_config_value() {
@@ -147,7 +143,7 @@ image_has_required_tex_baseline() {
   required_scheme="${TEXLIVE_REQUIRED_SCHEME:-}"
   check_files="${TEXLIVE_CHECK_FILES:-elsarticle.cls}"
   if [[ -n "$required_scheme" ]]; then
-    if ! docker run --rm --entrypoint sh "$image" -lc "tlmgr info '$required_scheme' | grep -Eiq 'installed:[[:space:]]+yes'"; then
+    if ! docker run --rm --entrypoint sh "$image" -lc "tlmgr info '$required_scheme' 2>/dev/null | grep -Eiq 'installed:[[:space:]]+yes'"; then
       return 1
     fi
   fi
