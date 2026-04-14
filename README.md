@@ -68,13 +68,15 @@ First start can take significantly longer because the local hardened TeX image m
 - Bash
 - Use `./work`
 
-### macOS (Supported but not tested)
+### macOS (Supported with Apple Silicon fallback)
 
 - Docker Desktop running
 - Git
 - Bash
 - Use `./work`
 
+On Apple Silicon (`arm64`), `work` auto-falls back ShareLaTeX image operations to `linux/amd64` emulation because the pinned ShareLaTeX base image is amd64-only.
+First start/build/compile can be slower under emulation.
 macOS is supported by the current script path, but this repo is not yet CI-validated on macOS.
 
 ## Command Guide
@@ -139,6 +141,7 @@ Primary settings:
 - `OVERLEAF_HOST`, `OVERLEAF_PORT`
 - `OVERLEAF_APP_NAME` (UI branding title, default `Overleaf`)
 - `BASE_OVERLEAF_IMAGE_TAG`, `OVERLEAF_IMAGE_TAG`
+- `OVERLEAF_IMAGE_PLATFORM` (`auto` default; arm64 host auto-fallback to `linux/amd64`)
 - `TEXLIVE_PACKAGES`, `TEXLIVE_REQUIRED_SCHEME`, `TEXLIVE_CHECK_FILES`
 - `AUTO_PRUNE_SHARELATEX_IMAGES` (`1` default)
 - `KEEP_BASE_OVERLEAF_IMAGE` (`0` default)
@@ -177,6 +180,16 @@ If recovery is still needed manually, run:
 
 The internal baseline checks now suppress non-fatal `tlmgr info` warning noise in normal `work` flows.
 Real compile failures are still shown in Overleaf UI and `work logs`.
+
+### `no matching manifest for linux/arm64/v8` on macOS Apple Silicon
+
+This means Docker tried to run the ShareLaTeX image as arm64, but the pinned image is amd64-only.
+
+Current behavior:
+- `OVERLEAF_IMAGE_PLATFORM=auto` (default) now auto-selects `linux/amd64` on arm64 hosts.
+
+Manual override (if needed):
+- set `OVERLEAF_IMAGE_PLATFORM=linux/amd64` in `work.config`.
 
 ## Roadmap (Future Goals, Not Implemented Yet)
 

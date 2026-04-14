@@ -11,6 +11,8 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 fi
 
 IMAGE_REBUILT=0
+RESOLVED_IMAGE_PLATFORM=""
+IMAGE_PLATFORM_NOTICE=""
 
 load_config() {
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -110,6 +112,70 @@ ensure_prerequisites() {
   docker info >/dev/null 2>&1 || die "docker daemon is not running."
 }
 
+normalize_arch() {
+  local arch="${1,,}"
+  case "$arch" in
+    amd64 | x86_64) echo "amd64" ;;
+    arm64 | aarch64) echo "arm64" ;;
+    *) echo "$arch" ;;
+  esac
+}
+
+detect_host_arch() {
+  local arch=""
+  arch="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
+  if [[ -z "$arch" ]]; then
+    arch="$(uname -m 2>/dev/null || true)"
+  fi
+  normalize_arch "$arch"
+}
+
+resolve_image_platform() {
+  local requested host_arch
+  requested="${OVERLEAF_IMAGE_PLATFORM:-auto}"
+  RESOLVED_IMAGE_PLATFORM=""
+  IMAGE_PLATFORM_NOTICE=""
+
+  if [[ "$requested" == "auto" || -z "$requested" ]]; then
+    host_arch="$(detect_host_arch)"
+    if [[ "$host_arch" == "arm64" ]]; then
+      RESOLVED_IMAGE_PLATFORM="linux/amd64"
+      IMAGE_PLATFORM_NOTICE="Platform notice: arm64 host detected; using linux/amd64 emulation for ShareLaTeX image operations."
+    fi
+    return 0
+  fi
+
+  RESOLVED_IMAGE_PLATFORM="$requested"
+  host_arch="$(detect_host_arch)"
+  if [[ "$host_arch" == "arm64" && "$RESOLVED_IMAGE_PLATFORM" == "linux/amd64" ]]; then
+    IMAGE_PLATFORM_NOTICE="Platform notice: arm64 host with explicit linux/amd64 ShareLaTeX platform."
+  fi
+}
+
+docker_sharelatex_pull() {
+  local image="$1"
+  if [[ -n "$RESOLVED_IMAGE_PLATFORM" ]]; then
+    docker pull --platform "$RESOLVED_IMAGE_PLATFORM" "$image"
+  else
+    docker pull "$image"
+  fi
+}
+
+docker_sharelatex_run() {
+  local -a args=()
+  if [[ -n "$RESOLVED_IMAGE_PLATFORM" ]]; then
+    args+=(--platform "$RESOLVED_IMAGE_PLATFORM")
+  fi
+  docker run "${args[@]}" "$@"
+}
+
+print_image_platform_notice() {
+  if [[ -n "${IMAGE_PLATFORM_NOTICE:-}" ]]; then
+    echo "$IMAGE_PLATFORM_NOTICE"
+  fi
+  return 0
+}
+
 target_image_ref() {
   echo "sharelatex/sharelatex:${OVERLEAF_IMAGE_TAG}"
 }
@@ -143,12 +209,12 @@ image_has_required_tex_baseline() {
   required_scheme="${TEXLIVE_REQUIRED_SCHEME:-}"
   check_files="${TEXLIVE_CHECK_FILES:-elsarticle.cls}"
   if [[ -n "$required_scheme" ]]; then
-    if ! docker run --rm --entrypoint sh "$image" -lc "tlmgr info '$required_scheme' 2>/dev/null | grep -Eiq 'installed:[[:space:]]+yes'"; then
+    if ! docker_sharelatex_run --rm --entrypoint sh "$image" -lc "tlmgr info '$required_scheme' 2>/dev/null | grep -Eiq 'installed:[[:space:]]+yes'"; then
       return 1
     fi
   fi
   for check in $check_files; do
-    if ! docker run --rm --entrypoint sh "$image" -lc "kpsewhich '$check' >/dev/null 2>&1"; then
+    if ! docker_sharelatex_run --rm --entrypoint sh "$image" -lc "kpsewhich '$check' >/dev/null 2>&1"; then
       return 1
     fi
   done
@@ -163,10 +229,10 @@ install_tex_packages_into_image() {
   builder="latex-local-overleaf-build-$$"
 
   if ! docker image inspect "$base_image" >/dev/null 2>&1; then
-    docker pull "$base_image" >/dev/null
+    docker_sharelatex_pull "$base_image" >/dev/null
   fi
 
-  docker run -d --name "$builder" --entrypoint sh "$base_image" -lc "while true; do sleep 3600; done" >/dev/null
+  docker_sharelatex_run -d --name "$builder" --entrypoint sh "$base_image" -lc "while true; do sleep 3600; done" >/dev/null
   if ! docker exec -e WORK_TEX_PACKAGES="$package_list" "$builder" bash -lc \
     "set -euo pipefail; year=\$(tlmgr --version | awk '/TeX Live/{print \$NF; exit}'); repo=\"https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/\${year}/tlnet-final\"; tlmgr option repository \"\$repo\" >/dev/null; if [[ -n \"\${WORK_TEX_PACKAGES:-}\" ]]; then tlmgr install \${WORK_TEX_PACKAGES} >/tmp/texlive-install.log 2>&1 || { tail -n 200 /tmp/texlive-install.log; exit 1; }; fi"; then
     docker exec "$builder" bash -lc "test -f /tmp/texlive-install.log && tail -n 200 /tmp/texlive-install.log || true" || true
@@ -181,7 +247,7 @@ install_tex_packages_into_image() {
 resolve_packages_for_missing_file() {
   local image="$1"
   local missing_file="$2"
-  docker run --rm --entrypoint bash -e WORK_MISSING_FILE="$missing_file" "$image" -lc \
+  docker_sharelatex_run --rm --entrypoint bash -e WORK_MISSING_FILE="$missing_file" "$image" -lc \
     "set -euo pipefail; year=\$(tlmgr --version | awk '/TeX Live/{print \$NF; exit}'); repo=\"https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/\${year}/tlnet-final\"; tlmgr option repository \"\$repo\" >/dev/null; tlmgr search --global --file \"/\${WORK_MISSING_FILE}\" 2>/dev/null | awk -F: '/^[^[:space:]][^:]*:$/ {print \$1}'" \
     | tr -d '\r'
 }
@@ -287,6 +353,11 @@ volumes:
 
 services:
   sharelatex:
+EOF
+  if [[ -n "$RESOLVED_IMAGE_PLATFORM" ]]; then
+    printf "    platform: %s\n" "$RESOLVED_IMAGE_PLATFORM" >>"$override_file"
+  fi
+  cat >>"$override_file" <<'EOF'
     volumes:
       - overleaf-data:/var/lib/overleaf
 
@@ -329,6 +400,8 @@ cmd_start() {
   local url
   url="http://${OVERLEAF_HOST}:${OVERLEAF_PORT}${OVERLEAF_OPEN_PATH}"
   ensure_prerequisites
+  resolve_image_platform
+  print_image_platform_notice
   ensure_overleaf_image
   ensure_toolkit_present
   ensure_toolkit_line_endings
@@ -403,6 +476,7 @@ cmd_self_check() {
   root="$(toolkit_root)"
   rc_file="$root/config/overleaf.rc"
   version_file="$root/config/version"
+  resolve_image_platform
   echo "Repository root: $REPO_ROOT"
   echo "Toolkit path: $TOOLKIT_PATH"
   echo "Toolkit repo: $TOOLKIT_REPO"
@@ -414,8 +488,11 @@ cmd_self_check() {
   echo "TeX packages: ${TEXLIVE_PACKAGES:-<none>}"
   echo "Required TeX scheme: ${TEXLIVE_REQUIRED_SCHEME:-<none>}"
   echo "TeX check files: ${TEXLIVE_CHECK_FILES:-elsarticle.cls}"
+  echo "Image platform policy: ${OVERLEAF_IMAGE_PLATFORM:-auto}"
+  echo "Resolved image platform: ${RESOLVED_IMAGE_PLATFORM:-native}"
   echo "Auto prune extra sharelatex images: ${AUTO_PRUNE_SHARELATEX_IMAGES:-1}"
   echo "Keep base image tag: ${KEEP_BASE_OVERLEAF_IMAGE:-0}"
+  print_image_platform_notice
   echo ""
   have_cmd docker && echo "docker: OK" || echo "docker: MISSING"
   have_cmd git && echo "git: OK" || echo "git: MISSING"
@@ -461,6 +538,7 @@ cmd_tex_install() {
   local target_image package_list
   [[ $# -gt 0 ]] || die "Usage: work tex install <tlmgr-package...>"
   ensure_prerequisites
+  resolve_image_platform
   ensure_overleaf_image
   target_image="$(target_image_ref)"
   package_list="$*"
@@ -479,6 +557,7 @@ cmd_tex_install_missing() {
   local -a unresolved=()
   [[ $# -gt 0 ]] || die "Usage: work tex install-missing <missing-file...>"
   ensure_prerequisites
+  resolve_image_platform
   ensure_overleaf_image
   target_image="$(target_image_ref)"
 
