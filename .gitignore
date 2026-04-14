@@ -1,0 +1,12 @@
+# Local runtime and logs
+overleaf-toolkit/data/
+
+# Generated toolkit local config
+overleaf-toolkit/config/overleaf.rc
+overleaf-toolkit/config/variables.env
+overleaf-toolkit/config/docker-compose.override.yml
+overleaf-toolkit/config/version
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
