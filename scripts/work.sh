@@ -113,7 +113,8 @@ ensure_prerequisites() {
 }
 
 normalize_arch() {
-  local arch="${1,,}"
+  local arch="${1:-}"
+  arch="$(printf '%s' "$arch" | tr '[:upper:]' '[:lower:]')"
   case "$arch" in
     amd64 | x86_64) echo "amd64" ;;
     arm64 | aarch64) echo "arm64" ;;
