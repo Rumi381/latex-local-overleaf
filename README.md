@@ -14,6 +14,21 @@ This repo is **not**:
 - A drop-in replacement for all overleaf.com hosted features.
 - A filesystem mirror where browser edits are continuously written to normal project folders.
 
+## Clone and Start
+
+Clone with submodules (recommended):
+
+```bash
+git clone --recurse-submodules <your-repo-url>
+cd latex-local-overleaf
+```
+
+If you already cloned without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
 ## Quick Start (60 seconds)
 
 1. Open a terminal at the repo root.
@@ -166,3 +181,8 @@ When proposing new features, include:
 - expected workflow,
 - operational impact,
 - rollback/failure considerations.
+
+## License
+
+This repository is licensed under the GNU Affero General Public License v3.0.
+See [`LICENSE`](LICENSE).
